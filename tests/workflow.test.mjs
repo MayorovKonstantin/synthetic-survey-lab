@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning, evaluateQuestionPerturbation, evaluateRunReproducibility } from '../domain.mjs';
+import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning, evaluateQuestionPerturbation, evaluateRunReproducibility, importBenchmarkReference, evaluateSyntheticAgainstBenchmark } from '../domain.mjs';
 import { openStore } from '../store.mjs';
 import { createApp } from '../server.mjs';
 import { generateWithPlan } from '../plan.mjs';
@@ -149,6 +149,33 @@ test('repeatability comparison distinguishes exact replay from changed seed', ()
   assert.equal(changed.status, 'changed-factor');
   assert.equal(changed.baseline.seed, 'exp-003-fixed');
   assert.equal(changed.repeat.seed, 'exp-003-changed');
+});
+
+test('benchmark adapter preserves source mapping and computes distribution distance', () => {
+  const s = firstRun();
+  const reference = importBenchmarkReference({
+    source: { id: 'demo-reference-001', title: 'Local demo fixture', license: 'internal-demo' },
+    questionMap: { source_q2: 'q2' },
+    allowedOptionsByQuestion: { q2: ['Быстро', 'Тщательно', 'Сначала уточняю условия'] },
+    items: [
+      { sourceQuestionId: 'source_q2', respondentId: 'r1', value: 'Быстро' },
+      { sourceQuestionId: 'source_q2', respondentId: 'r2', value: 'Быстро' },
+      { sourceQuestionId: 'source_q2', respondentId: 'r3', value: 'Тщательно' },
+      { sourceQuestionId: 'source_q2', respondentId: 'r4', value: 'Тщательно' },
+      { sourceQuestionId: 'source_q2', respondentId: 'r5', value: 'Сначала уточняю условия' }
+    ]
+  });
+  const result = evaluateSyntheticAgainstBenchmark({ study: s, reference, questionIds: ['q2'] });
+  assert.equal(result.experimentId, 'EXP-004');
+  assert.equal(result.status, 'computed');
+  assert.equal(result.source.id, 'demo-reference-001');
+  assert.equal(result.questions.length, 1);
+  assert.equal(result.questions[0].questionId, 'q2');
+  assert.ok(result.questions[0].synthetic.sampleSize > 0);
+  assert.equal(result.questions[0].reference.sampleSize, 5);
+  assert.ok(result.questions[0].totalVariationDistance >= 0 && result.questions[0].totalVariationDistance <= 1);
+  assert.ok(result.meanTotalVariationDistance >= 0 && result.meanTotalVariationDistance <= 1);
+  assert.match(result.limitations[0], /not population inference/);
 });
 
 test('audience description changes proposed profile and answers', () => {

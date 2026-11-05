@@ -237,6 +237,61 @@ export function evaluateRunReproducibility({ baselineStudy, repeatStudy, baselin
   };
 }
 
+export function importBenchmarkReference({ source, items, questionMap = {}, allowedOptionsByQuestion = {} } = {}) {
+  need(source?.id && source?.license, 'Benchmark reference требует source ID и license metadata.');
+  need(Array.isArray(items) && items.length > 0, 'Benchmark reference должен содержать item-level responses.');
+  const normalized = items.map((item, index) => {
+    need(item?.sourceQuestionId && item?.respondentId && typeof item.value === 'string',
+      `Benchmark item ${index + 1} не содержит sourceQuestionId, respondentId или value.`);
+    const questionId = questionMap[item.sourceQuestionId];
+    need(questionId, `Для benchmark item ${item.sourceQuestionId} нет mapping на question ID.`);
+    const allowed = allowedOptionsByQuestion[questionId];
+    need(!allowed || allowed.includes(item.value),
+      `Benchmark item ${item.sourceQuestionId} содержит неподдерживаемый вариант ответа.`);
+    return { sourceId: source.id, sourceQuestionId: item.sourceQuestionId,
+      questionId, respondentId: String(item.respondentId), value: item.value };
+  });
+  return { source: { id: source.id, title: source.title || '', license: source.license,
+    accessedAt: source.accessedAt || null }, items: normalized };
+}
+
+export function evaluateSyntheticAgainstBenchmark({ study, reference, runId = study?.runs?.at(-1)?.id, questionIds } = {}) {
+  need(study && reference?.source?.id && Array.isArray(reference.items), 'Нужны study и импортированный benchmark reference.');
+  const run = study.runs?.find(item => item.id === runId);
+  need(run, `Опрос ${runId || ''} не найден.`);
+  const questionnaire = study.questionnaires?.[run.questionnaireVersion - 1];
+  need(questionnaire, 'Версия анкеты для benchmark не найдена.');
+  const selectedQuestionIds = questionIds || [...new Set(reference.items.map(item => item.questionId))];
+  const questions = selectedQuestionIds.map(questionId => {
+    const question = questionnaire.questions.find(item => item.id === questionId);
+    need(question, `В benchmark отсутствует вопрос ${questionId} в questionnaire version.`);
+    const syntheticAnswers = run.answers.filter(answer => answer.questionId === questionId);
+    const referenceAnswers = reference.items.filter(item => item.questionId === questionId);
+    need(syntheticAnswers.length > 0 && referenceAnswers.length > 0,
+      `Для ${questionId} нужны synthetic и reference responses.`);
+    const options = [...new Set([...question.options, ...referenceAnswers.map(answer => answer.value)])];
+    const summarize = (answers, valueOf) => {
+      const counts = Object.fromEntries(options.map(option => [option, answers.filter(answer => valueOf(answer) === option).length]));
+      const shares = Object.fromEntries(options.map(option => [option, counts[option] / answers.length]));
+      return { counts, shares, sampleSize: answers.length };
+    };
+    const synthetic = summarize(syntheticAnswers, answer => answer.value);
+    const referenceSummary = summarize(referenceAnswers, answer => answer.value);
+    const totalVariationDistance = 0.5 * options.reduce((sum, option) =>
+      sum + Math.abs(synthetic.shares[option] - referenceSummary.shares[option]), 0);
+    return { questionId, synthetic, reference: referenceSummary, totalVariationDistance };
+  });
+  const meanTotalVariationDistance = questions.reduce((sum, item) => sum + item.totalVariationDistance, 0) / questions.length;
+  return {
+    experimentId: 'EXP-004',
+    source: reference.source,
+    run: { runId: run.id, seed: run.seed, method: run.method, questionnaireVersion: run.questionnaireVersion },
+    questions, meanTotalVariationDistance, status: 'computed',
+    limitations: ['Benchmark comparison is not population inference and does not establish causal validity or human fidelity.',
+      'External datasets require separate terms, license and data review before use.']
+  };
+}
+
 export function validateQuestions(questions, taskIds) {
   const errors = [], warnings = [];
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 8) errors.push('Анкета должна содержать от 1 до 8 вопросов.');
