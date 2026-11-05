@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createResearch, transition, validateQuestions } from '../domain.mjs';
+import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning } from '../domain.mjs';
 import { openStore } from '../store.mjs';
 import { createApp } from '../server.mjs';
 import { generateWithPlan } from '../plan.mjs';
@@ -65,6 +65,37 @@ test('persona profiles affect answers with the same question and seed', () => {
   assert.notDeepEqual(high.runs[0].summary[0].counts, low.runs[0].summary[0].counts);
   assert.ok(high.runs[0].answers.every(a => a.personaId && a.segmentId && a.questionnaireVersion === 1));
   assert.equal(high.runs[0].summary[0].counts.Часто > low.runs[0].summary[0].counts.Часто, true);
+});
+
+test('paired persona conditioning produces a provenance-rich evaluation result', () => {
+  let s = approvedStudy();
+  const segmentId = s.segments[0].id;
+  s.personas = [
+    { id: 'persona-fast', segmentId, name: 'Fast persona', description: 'Prioritizes speed', exposure: 'high', priority: 'speed' },
+    { id: 'persona-careful', segmentId, name: 'Careful persona', description: 'Prioritizes careful review', exposure: 'high', priority: 'careful' }
+  ];
+  s = next(next(s, 'propose-questions'), 'validate-questions');
+  s = next(s, 'run', { sampleSize: 60, seed: 'exp-001-fixed' });
+  const result = evaluatePairedPersonaConditioning(s, {
+    personaIds: ['persona-fast', 'persona-careful'],
+    questionId: 'q2',
+    expectedOptionByPersona: {
+      'persona-fast': 'Быстро',
+      'persona-careful': 'Тщательно'
+    }
+  });
+  assert.equal(result.experimentId, 'EXP-001');
+  assert.equal(result.status, 'pass');
+  assert.equal(result.fixture.seed, 'exp-001-fixed');
+  assert.equal(result.fixture.questionnaireVersion, 1);
+  assert.equal(result.comparisons.length, 2);
+  assert.ok(result.maxShareGap >= 0.2);
+  assert.ok(result.comparisons.every(item => item.sampleSize > 0));
+  assert.match(result.limitations[0], /не устанавливает соответствие ответов реальным людям/);
+  assert.deepEqual(evaluatePairedPersonaConditioning(s, {
+    personaIds: ['persona-fast', 'persona-careful'], questionId: 'q2',
+    expectedOptionByPersona: { 'persona-fast': 'Быстро', 'persona-careful': 'Тщательно' }
+  }), result);
 });
 
 test('audience description changes proposed profile and answers', () => {

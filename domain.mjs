@@ -109,6 +109,59 @@ function proposeQuestions(study, payload) {
   event(study, 'questionnaire_proposed', study.mode === 'chatgpt' ? { model: payload.model } : {});
 }
 
+export function evaluatePairedPersonaConditioning(study, {
+  runId = study.runs.at(-1)?.id,
+  personaIds,
+  questionId,
+  expectedOptionByPersona = {},
+  minShareGap = 0.2
+} = {}) {
+  need(study && Array.isArray(study.runs) && study.runs.length > 0, 'Нет завершённого опроса для оценки.');
+  const run = study.runs.find(item => item.id === runId);
+  need(run, `Опрос ${runId || ''} не найден.`);
+  const selectedPersonaIds = Array.isArray(personaIds) ? personaIds : [];
+  need(selectedPersonaIds.length === 2 && new Set(selectedPersonaIds).size === 2,
+    'Для парной оценки нужны две разные персоны.');
+  const personas = selectedPersonaIds.map(id => study.personas?.find(persona => persona.id === id));
+  need(personas.every(Boolean), 'Все персоны парной оценки должны существовать.');
+  need(personas[0].segmentId === personas[1].segmentId,
+    'Парные персоны должны принадлежать одному сегменту.');
+  const answers = run.answers.filter(answer => selectedPersonaIds.includes(answer.personaId) && answer.questionId === questionId);
+  need(answers.length > 0, 'В выбранном опросе нет ответов парных персон на указанный вопрос.');
+  const comparisons = personas.map(persona => {
+    const values = answers.filter(answer => answer.personaId === persona.id).map(answer => answer.value);
+    need(values.length > 0, `Нет ответов персоны ${persona.id}.`);
+    const counts = Object.fromEntries([...new Set(values)].map(value => [value, values.filter(item => item === value).length]));
+    const shares = Object.fromEntries(Object.entries(counts).map(([value, count]) => [value, count / values.length]));
+    return { personaId: persona.id, segmentId: persona.segmentId, counts, shares, sampleSize: values.length };
+  });
+  const values = new Set(comparisons.flatMap(item => Object.keys(item.counts)));
+  const maxShareGap = [...values].reduce((max, value) => Math.max(max,
+    Math.abs((comparisons[0].shares[value] || 0) - (comparisons[1].shares[value] || 0))), 0);
+  const expectedChecks = selectedPersonaIds.map(id => {
+    const expected = expectedOptionByPersona[id];
+    if (!expected) return { personaId: id, checked: false, pass: true };
+    const comparison = comparisons.find(item => item.personaId === id);
+    const share = comparison.shares[expected] || 0;
+    return { personaId: id, expectedOption: expected, observedShare: share, checked: true, pass: share > 0.5 };
+  });
+  const observedDifference = maxShareGap >= minShareGap;
+  const expectedChecksPass = expectedChecks.every(item => item.pass);
+  return {
+    experimentId: 'EXP-001',
+    method: run.method,
+    fixture: { segmentId: personas[0].segmentId, personaIds: selectedPersonaIds,
+      questionId, questionnaireVersion: run.questionnaireVersion, seed: run.seed },
+    comparisons,
+    expectedDistinction: 'persona profile changes answer distribution',
+    expectedChecks,
+    maxShareGap,
+    observedDifference,
+    status: observedDifference && expectedChecksPass ? 'pass' : 'fail',
+    limitations: ['Проверка подтверждает влияние профиля на реализацию, но не устанавливает соответствие ответов реальным людям.']
+  };
+}
+
 export function validateQuestions(questions, taskIds) {
   const errors = [], warnings = [];
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 8) errors.push('Анкета должна содержать от 1 до 8 вопросов.');

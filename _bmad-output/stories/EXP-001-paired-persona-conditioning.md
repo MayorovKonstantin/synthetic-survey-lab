@@ -1,7 +1,7 @@
 ---
 id: EXP-001
 slug: paired-persona-conditioning
-status: draft
+status: done
 type: experiment-story
 hypothesis: H-001
 owner: product-owner
