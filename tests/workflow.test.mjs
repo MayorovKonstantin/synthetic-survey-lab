@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning, evaluateQuestionPerturbation } from '../domain.mjs';
+import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning, evaluateQuestionPerturbation, evaluateRunReproducibility } from '../domain.mjs';
 import { openStore } from '../store.mjs';
 import { createApp } from '../server.mjs';
 import { generateWithPlan } from '../plan.mjs';
@@ -127,6 +127,28 @@ test('question perturbation compares controlled runs and records option deltas',
   assert.ok(result.changed);
   assert.ok(result.changedOptions.length > 0);
   assert.match(result.limitations[1], /human fidelity/);
+});
+
+test('repeatability comparison distinguishes exact replay from changed seed', () => {
+  const build = seed => {
+    let s = approvedStudy();
+    s = next(next(s, 'propose-questions'), 'validate-questions');
+    return next(s, 'run', { sampleSize: 60, seed });
+  };
+  const baseline = build('exp-003-fixed');
+  const repeat = build('exp-003-fixed');
+  const replay = evaluateRunReproducibility({ baselineStudy: baseline, repeatStudy: repeat });
+  assert.equal(replay.experimentId, 'EXP-003');
+  assert.equal(replay.comparison, 'exact-replay');
+  assert.equal(replay.status, 'pass');
+  assert.equal(replay.answersEqual, true);
+  assert.equal(replay.summaryEqual, true);
+  assert.equal(replay.provenanceComplete, true);
+  const changed = evaluateRunReproducibility({ baselineStudy: baseline, repeatStudy: build('exp-003-changed') });
+  assert.equal(changed.comparison, 'changed-factor');
+  assert.equal(changed.status, 'changed-factor');
+  assert.equal(changed.baseline.seed, 'exp-003-fixed');
+  assert.equal(changed.repeat.seed, 'exp-003-changed');
 });
 
 test('audience description changes proposed profile and answers', () => {

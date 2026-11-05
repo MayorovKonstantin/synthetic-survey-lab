@@ -206,6 +206,37 @@ export function evaluateQuestionPerturbation({ baselineStudy, perturbedStudy, qu
   };
 }
 
+export function evaluateRunReproducibility({ baselineStudy, repeatStudy, baselineRunId, repeatRunId } = {}) {
+  need(baselineStudy && repeatStudy, 'Нужны базовое и повторное исследование.');
+  const baselineRun = baselineStudy.runs?.find(run => run.id === (baselineRunId || baselineStudy.runs.at(-1)?.id));
+  const repeatRun = repeatStudy.runs?.find(run => run.id === (repeatRunId || repeatStudy.runs.at(-1)?.id));
+  need(baselineRun && repeatRun, 'Для сравнения нужны два завершённых опроса.');
+  const provenance = run => run.answers.every(answer => answer.personaId && answer.segmentId &&
+    answer.questionId && Number.isInteger(answer.questionnaireVersion));
+  const provenanceComplete = provenance(baselineRun) && provenance(repeatRun);
+  const fixture = run => ({ method: run.method, questionnaireVersion: run.questionnaireVersion,
+    personaIds: [...new Set(run.answers.map(answer => answer.personaId))].sort(),
+    segmentIds: [...new Set(run.answers.map(answer => answer.segmentId))].sort(),
+    questionIds: [...new Set(run.answers.map(answer => answer.questionId))].sort() });
+  const baselineFixture = fixture(baselineRun);
+  const repeatFixture = fixture(repeatRun);
+  const fixtureEqual = JSON.stringify(baselineFixture) === JSON.stringify(repeatFixture);
+  need(fixtureEqual, 'Базовый и повторный опрос используют разные provenance fixtures.');
+  const sameSeed = baselineRun.seed === repeatRun.seed;
+  const answersEqual = JSON.stringify(baselineRun.answers) === JSON.stringify(repeatRun.answers);
+  const summaryEqual = JSON.stringify(baselineRun.summary) === JSON.stringify(repeatRun.summary);
+  const comparison = sameSeed ? 'exact-replay' : 'changed-factor';
+  const status = !provenanceComplete ? 'invalid-comparison' :
+    sameSeed ? (answersEqual && summaryEqual ? 'pass' : 'fail') : 'changed-factor';
+  return {
+    experimentId: 'EXP-003', comparison,
+    baseline: { runId: baselineRun.id, seed: baselineRun.seed, ...baselineFixture },
+    repeat: { runId: repeatRun.id, seed: repeatRun.seed, ...repeatFixture },
+    answersEqual, summaryEqual, provenanceComplete, status,
+    limitations: ['Повторяемость реализации не устанавливает human fidelity или репрезентативность синтетических ответов.']
+  };
+}
+
 export function validateQuestions(questions, taskIds) {
   const errors = [], warnings = [];
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 8) errors.push('Анкета должна содержать от 1 до 8 вопросов.');
