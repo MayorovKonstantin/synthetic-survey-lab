@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning } from '../domain.mjs';
+import { createResearch, transition, validateQuestions, evaluatePairedPersonaConditioning, evaluateQuestionPerturbation } from '../domain.mjs';
 import { openStore } from '../store.mjs';
 import { createApp } from '../server.mjs';
 import { generateWithPlan } from '../plan.mjs';
@@ -96,6 +96,37 @@ test('paired persona conditioning produces a provenance-rich evaluation result',
     personaIds: ['persona-fast', 'persona-careful'], questionId: 'q2',
     expectedOptionByPersona: { 'persona-fast': 'Быстро', 'persona-careful': 'Тщательно' }
   }), result);
+});
+
+test('question perturbation compares controlled runs and records option deltas', () => {
+  const build = reorder => {
+    let s = approvedStudy();
+    s = next(next(s, 'propose-questions'), 'validate-questions');
+    if (reorder) {
+      const questions = structuredClone(s.questionnaires[0].questions);
+      questions[1].options = [...questions[1].options].reverse();
+      s.questionnaires[0].questions = questions;
+      s = next(s, 'validate-questions');
+    }
+    return next(s, 'run', { sampleSize: 60, seed: 'exp-002-fixed' });
+  };
+  const baseline = build(false);
+  const perturbed = build(true);
+  const result = evaluateQuestionPerturbation({
+    baselineStudy: baseline,
+    perturbedStudy: perturbed,
+    questionId: 'q2',
+    perturbation: { type: 'option-order', description: 'Reversed q2 answer options' }
+  });
+  assert.equal(result.experimentId, 'EXP-002');
+  assert.equal(result.status, 'diagnostic');
+  assert.equal(result.perturbation.type, 'option-order');
+  assert.equal(result.baseline.seed, 'exp-002-fixed');
+  assert.equal(result.perturbed.seed, 'exp-002-fixed');
+  assert.equal(result.baseline.sampleSize, result.perturbed.sampleSize);
+  assert.ok(result.changed);
+  assert.ok(result.changedOptions.length > 0);
+  assert.match(result.limitations[1], /human fidelity/);
 });
 
 test('audience description changes proposed profile and answers', () => {

@@ -162,6 +162,50 @@ export function evaluatePairedPersonaConditioning(study, {
   };
 }
 
+export function evaluateQuestionPerturbation({ baselineStudy, perturbedStudy, questionId, perturbation = {}, changeThreshold = 0.05 } = {}) {
+  need(baselineStudy && perturbedStudy, 'Нужны базовое и изменённое исследование.');
+  const baselineRun = baselineStudy.runs?.at(-1);
+  const perturbedRun = perturbedStudy.runs?.at(-1);
+  need(baselineRun && perturbedRun, 'Для сравнения нужны завершённые опросы.');
+  need(baselineRun.seed === perturbedRun.seed, 'Базовый и изменённый опрос должны использовать один seed.');
+  need(baselineRun.method === perturbedRun.method, 'Базовый и изменённый опрос должны использовать один метод.');
+  const baselineQuestion = baselineStudy.questionnaires?.[baselineRun.questionnaireVersion - 1]?.questions.find(q => q.id === questionId);
+  const perturbedQuestion = perturbedStudy.questionnaires?.[perturbedRun.questionnaireVersion - 1]?.questions.find(q => q.id === questionId);
+  need(baselineQuestion && perturbedQuestion, `Вопрос ${questionId} должен существовать в обеих версиях.`);
+  const baselineAnswers = baselineRun.answers.filter(answer => answer.questionId === questionId);
+  const perturbedAnswers = perturbedRun.answers.filter(answer => answer.questionId === questionId);
+  need(baselineAnswers.length > 0 && perturbedAnswers.length > 0, 'Для сравнения нужны ответы на выбранный вопрос.');
+  const options = [...new Set([...baselineQuestion.options, ...perturbedQuestion.options])];
+  const summarize = answers => {
+    const counts = Object.fromEntries(options.map(option => [option, answers.filter(answer => answer.value === option).length]));
+    const shares = Object.fromEntries(options.map(option => [option, counts[option] / answers.length]));
+    return { counts, shares, sampleSize: answers.length };
+  };
+  const baseline = summarize(baselineAnswers);
+  const perturbed = summarize(perturbedAnswers);
+  const distributionDelta = Object.fromEntries(options.map(option => [option,
+    perturbed.shares[option] - baseline.shares[option]]));
+  const changedOptions = options.filter(option => Math.abs(distributionDelta[option]) >= changeThreshold);
+  const baselinePersonaIds = new Set(baselineAnswers.map(answer => answer.personaId));
+  const perturbedPersonaIds = new Set(perturbedAnswers.map(answer => answer.personaId));
+  need([...baselinePersonaIds].every(id => perturbedPersonaIds.has(id)),
+    'Набор персон в базовом и изменённом опросе должен совпадать.');
+  return {
+    experimentId: 'EXP-002',
+    perturbation: { type: perturbation.type || 'unspecified', questionId, description: perturbation.description || '' },
+    baseline: { runId: baselineRun.id, seed: baselineRun.seed, method: baselineRun.method,
+      questionnaireVersion: baselineRun.questionnaireVersion, question: baselineQuestion.text, ...baseline },
+    perturbed: { runId: perturbedRun.id, seed: perturbedRun.seed, method: perturbedRun.method,
+      questionnaireVersion: perturbedRun.questionnaireVersion, question: perturbedQuestion.text, ...perturbed },
+    distributionDelta,
+    changedOptions,
+    changed: changedOptions.length > 0,
+    status: 'diagnostic',
+    limitations: ['Изменение распределения является диагностическим сигналом и не доказывает ошибку или соответствие человеческому поведению.',
+      'Сравнение не устанавливает human fidelity.']
+  };
+}
+
 export function validateQuestions(questions, taskIds) {
   const errors = [], warnings = [];
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 8) errors.push('Анкета должна содержать от 1 до 8 вопросов.');
