@@ -1,0 +1,17 @@
+# Running Synthetic Survey Lab
+
+Requires Node.js 22.13+, Windows and PowerShell 7 (`pwsh.exe`). Install dependencies once with `npm ci`, then run `npm test` and `npm start`. Open `http://127.0.0.1:4173`. The application binds only to loopback. Set `PORT` and `SSL_DB_PATH` for a separate port and SQLite file.
+
+## ChatGPT subscription candidate
+
+New studies default to ChatGPT mode. Click **Продолжить с ChatGPT** and complete the separate OpenAI sign-in and token-sharing consent. Return to the application and click **Обновить статус**; select a model from the returned catalog. This uses an eligible ChatGPT Plus/Pro plan or available credits through the official [Sign in with ChatGPT](https://developers.openai.com/siwc/quickstart) preview. A current Codex sign-in does not grant this application access automatically. No API key is requested. Eligibility, available models, and usage limits come from the connected account and may change.
+
+If the OpenAI page remains on a security check or the browser returns to the connection URL without consent, return to the app, click **Обновить статус**, then **Отменить попытку входа** before trying again. Completing Google sign-in alone is not the final subscription-sharing consent. If the embedded browser cannot complete the OpenAI check, open the local app URL in your normal Chrome or Edge browser and start a fresh attempt there. Never paste an authorization callback URL or token into a chat.
+
+The official `@siwc/local` DevKit snapshot (source: `openai/sign-in-with-chatgpt-devkit`, commit `f723814abdccec135b519c451fb6e1992ee5e933`, checked 2026-10-02) is vendored in `vendor/siwc-local` because the package is a private monorepo workspace, not a published npm package. Its noncommercial license and third-party notices are retained there. This training use is intended for personal learning and experimentation; the license excludes business or commercial use. Review the actual license before any wider reuse. This is a license summary, not a legal assurance.
+
+OAuth credentials are stored outside the repository in `%LOCALAPPDATA%\Synthetic Survey Lab\chatgpt` and encrypted for the current Windows user with DPAPI. The browser receives account status and model names, never tokens. Study content sent for generation includes the problem, audience, approved segments/personas, and questionnaire. The model's output is checked before it changes the study. An unavailable connection or invalid model output stops the action with an error; it does not silently substitute rule-generated content.
+
+Generation via ChatGPT covers research task proposals, segment recommendations, persona descriptions, questionnaire proposals, and respondent answers. User confirmation, formal questionnaire validation, synthetic-persona cognitive probe, caricature heuristic, report assembly, and persistence remain local. The survey uses 4–24 synthetic respondents in this mode. Responses are not deterministic, even when the same run label is entered. Synthetic results are exploratory hypotheses and are not human evidence.
+
+The recorded B0 rule-based behavior remains available by setting `SSL_MODE=rules` **before creating a new study**. Studies retain their original mode; opening an older rules study keeps that mode. The B0 record is in `../../baselines/synthetic-survey-lab-B0.md`. This candidate has not been promoted to a new baseline until live sign-in, the full Golden Path, and the evaluation gate are verified.
